@@ -2,7 +2,7 @@ services:
   - type: web
     name: brandguard-ai
     runtime: docker
-    plan: 0.5c-512mb
+    plan: free
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
@@ -14,5 +14,5 @@ services:
 
 databases:
   - name: brandguard-db
-    plan: 0.1c-256mb
+    plan: free
     ipAllowList: []
