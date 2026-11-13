@@ -1,0 +1,10 @@
+fastapi==0.162.6
+uvicorn==0.34.2
+SQLAlchemy==2.0.41
+alembic==1.16.1
+psycopg[binary]==3.2.9
+python-dotenv==1.1.0
+python-multipart==0.0.33
+PyMuPDF==1.28.2
+python-docx==1.2.0
+httpx==0.28.1
