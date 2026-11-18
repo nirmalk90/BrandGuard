@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BookOpen, FileText, Plus } from 'lucide-react'
 import { api, dateLabel, label, readFile, useData, useTask, type Knowledge, type Profile, type Rule, type RuleSpec, type Session, type Severity, type Source } from './api'
 import { Badge, Loading, Notice, PageTitle } from './ui'
+import { AssetSettings, WordPressSettings } from './Artwork'
 
 const categories = ['Terminology', 'Promotional claim', 'Approved fact', 'Tone', 'Clarity']
 const kinds: Record<RuleSpec['kind'], string> = {
@@ -67,8 +68,8 @@ export function KnowledgePage({ session }: { session: Session }) {
   return <>
     <PageTitle title="Brand Knowledge" description="Maintain the rules, facts, and source documents behind every review."
       action={admin && <div className="button-row"><button className="button secondary" onClick={() => setEditor('source')}><Plus size={16}/> Add source</button>
-      <button className="button primary" onClick={() => setEditor('new')}><Plus size={16}/> Add rule</button></div>}/>
-    <section className="panel profile-banner"><span className="icon-tile"><BookOpen size={24}/></span><div><h2>{session.profile.name}</h2><p>{session.profile.industry} · {session.profile.description}</p><p><strong>Brand voice</strong> · {session.profile.tone}</p></div></section>
+      <button className="button primary" disabled={!data?.sources.length} onClick={() => setEditor('new')}><Plus size={16}/> Add rule</button></div>}/>
+    <section className="panel glass profile-banner"><span className="icon-tile"><BookOpen size={24}/></span><div><h2>{session.profile.name}</h2><p>{session.profile.industry} · {session.profile.description}</p><p><strong>Brand voice</strong> · {session.profile.tone}</p></div></section>
     {error ? <Notice>{error}</Notice> : !data ? <Loading/> : <>
       {admin && editor === 'source' && <SourceForm done={done}/>}
       {admin && editor && editor !== 'source' && <RuleForm key={editor === 'new' ? 'new' : editor.id} sources={data.sources} rule={editor === 'new' ? undefined : editor} done={done}/>}
@@ -84,7 +85,7 @@ export function KnowledgePage({ session }: { session: Session }) {
           {admin && <button className="text-button" onClick={() => { setEditor(rule); window.scrollTo(0, 0) }}>Edit rule</button>}
         </article>)}</div>
       </section>
-      <section className="panel form-card"><h2>Approved sources</h2>{data.sources.map(source => <details className="source" key={source.id}>
+      <section className="panel form-card"><h2>Approved sources</h2>{!data.sources.length && <p>Add an approved guideline or fact sheet to start defining rules.</p>}{data.sources.map(source => <details className="source" key={source.id}>
         <summary><FileText size={16}/> {source.title} · v{source.version}</summary><p>{source.content}</p><small>Source ID · {source.id}</small>
       </details>)}</section>
     </>}
@@ -100,19 +101,21 @@ export function SettingsPage({ session, update }: { session: Session; update: (s
   const [profile, setProfile] = useState(session.profile)
   const task = useTask()
   return <>
-    <PageTitle title="Settings" description="Manage your sample brand profile and review preferences."/>
+    <PageTitle title="Settings" description="Manage your brand profile, approved assets and publishing connection."/>
     <form className="panel form-card settings-card" onSubmit={event => { event.preventDefault(); void task.run(async () => {
       update(await api<Session>('/brand', 'PUT', profile)); task.setMessage('Brand profile saved.')
     }) }}>
       <h2>Brand profile</h2>
-      {session.role !== 'admin' && <p className="muted">Switch to Admin in the demo role menu to edit the profile.</p>}
+      {session.role !== 'admin' && <p className="muted">A workspace admin can edit this profile.</p>}
       {task.error && <Notice>{task.error}</Notice>}{task.message && <p className="success" role="status">{task.message}</p>}
       <fieldset className="field-grid" disabled={session.role !== 'admin' || task.pending}>
-        {(Object.keys(profileLabels) as (keyof Profile)[]).map(key => <label key={key}>{profileLabels[key]}<input
+        {(Object.keys(profileLabels) as (keyof Profile)[]).map(key => <label key={key} className={key === 'tone' ? 'settings-tone' : undefined}>{profileLabels[key]}<input
           type={key.endsWith('_color') ? 'color' : 'text'} required={key === 'name'} value={profile[key]} onChange={event => setProfile({ ...profile, [key]: event.target.value })}/></label>)}
         {session.role === 'admin' && <div><button className="button primary">Save brand profile</button></div>}
       </fieldset>
     </form>
+    <AssetSettings session={session}/>
+    {session.role === 'admin' && <WordPressSettings/>}
     <section className="panel form-card settings-card"><h2>Analysis mode</h2><Badge value={session.ai_available ? 'Optional AI assistance' : 'Rule-based'} />
       <p className="muted">{session.ai_available ? 'External AI assistance requires opt-in on each review.' : 'Drafts are checked using rules and approved facts stored in this workspace.'}</p></section>
   </>

@@ -4,9 +4,10 @@ from hashlib import sha256
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from backend.db import actions, engine, findings, now, reviews, rules, sources, submissions, versions
+from backend import artwork
+from backend.db import actions, assets, engine, findings, now, posts, reviews, rules, sources, submissions, versions, workspaces
 from backend.demo import ACTORS, new_id
-from backend.engine import review
+from backend.engine import applicable, review
 
 
 def scoped(connection, table, actor, item_id):
@@ -20,7 +21,7 @@ def scoped(connection, table, actor, item_id):
 
 def require(actor, *roles):
     if actor.role not in roles:
-        raise HTTPException(403, "Switch to an authorised demo role to perform this action.")
+        raise HTTPException(403, "Your workspace role cannot perform this action.")
 
 
 def advance(connection, record, generation, status, revision=None):
@@ -48,11 +49,16 @@ def policy(connection, workspace_id):
                          sources.c.workspace_id == workspace_id).order_by(rules.c.created_at, rules.c.id)).mappings())
 
 
-def save_review(connection, version_id, result):
+def rule_snapshot(policy_rows):
+    return [dict(id=r["id"], title=r["spec"]["title"], version=r["version"]) for r in applicable(policy_rows)]
+
+
+def save_review(connection, version_id, result, snapshot):
     assessment, mode, checked, notice = result
     review_id = new_id()
     connection.execute(reviews.insert().values(
         id=review_id, version_id=version_id, mode=mode, rules_checked=checked, notice=notice,
+        rules_snapshot=snapshot,
     ))
     if assessment:
         connection.execute(findings.insert(), [
@@ -79,11 +85,31 @@ def detail(connection, actor, submission_id):
                 ).order_by(findings.c.id)).mappings()
             ]
             review_list.append({**assessment, "findings": items})
-        revision_list.append({**version, "reviews": review_list})
+        image_info = None
+        if version.artwork_id:
+            image = connection.execute(select(*artwork.PUBLIC, assets.c.lines).where(
+                assets.c.id == version.artwork_id, assets.c.workspace_id == actor.workspace_id)).mappings().one()
+            image_info = {c.name: image[c.name] for c in artwork.PUBLIC}
+            image_info["text"] = "\n".join(" ".join(w["text"] for w in line) for line in image.lines)
+        revision_list.append({**version, "artwork": image_info, "reviews": review_list})
     decisions = list(connection.execute(select(actions).where(
         actions.c.submission_id == submission_id,
     ).order_by(actions.c.created_at, actions.c.id)).mappings())
-    return {**record, "versions": revision_list, "actions": decisions}
+    wordpress = connection.execute(select(posts.c.snapshot).where(
+        posts.c.submission_id == submission_id)).scalar_one_or_none()
+    return {**record, "versions": revision_list, "actions": decisions, "wordpress": wordpress}
+
+
+def attached(connection, actor, asset_id):
+    if asset_id:
+        asset = scoped(connection, assets, actor, asset_id)
+        if asset["kind"] != "artwork":
+            raise HTTPException(422, "Choose a marketing artwork upload.")
+        return asset
+
+
+def actor_name(actor):
+    return getattr(actor, "name", None) or ACTORS[actor.role]
 
 
 def analyze(actor, data, submission_id=None):
@@ -91,15 +117,39 @@ def analyze(actor, data, submission_id=None):
     content_hash = sha256(data.content.encode()).hexdigest()
     with engine.connect() as connection:
         applicable_policy = policy(connection, actor.workspace_id)
+        asset_id = data.artwork_id
         if submission_id:
             existing = scoped(connection, submissions, actor, submission_id)
+            if connection.execute(select(posts.c.id).where(posts.c.submission_id == submission_id)).first():
+                raise HTTPException(409, "Send changed WordPress drafts from the post editor.")
             if existing["generation"] != data.generation:
                 raise HTTPException(409, "This submission changed. Reload it and try again.")
             previous = current_version(connection, existing)
-            same_content = previous.content_hash == content_hash
+            if "artwork_id" not in data.model_fields_set:
+                asset_id = previous.artwork_id
+            same_content = previous.content_hash == content_hash and previous.artwork_id == asset_id
             if same_content and existing["status"] not in {"DRAFT", "REVIEWED"}:
                 raise HTTPException(409, "Edit the content to start a new revision.")
-    result = review(data.content, applicable_policy, data.use_ai)
+        asset = attached(connection, actor, asset_id)
+        if asset:
+            workspace = connection.execute(select(workspaces).where(
+                workspaces.c.id == actor.workspace_id).with_for_update(read=True)).one()
+            refs = artwork.logos(connection, actor, include_pixels=True)
+    words, spans = artwork.text_evidence(asset["lines"]) if asset else ("", [])
+    items, mode, checked, notice = review(data.content, applicable_policy, data.use_ai, words, spans)
+    snapshot = rule_snapshot(applicable_policy)
+    if asset:
+        with artwork.processing_slot():
+            visual_items, checks = artwork.visual_review(asset, refs, workspace)
+        items.extend(visual_items)
+        snapshot.extend(checks)
+        notes = [notice] if notice else []
+        if not words:
+            notes.append("OCR found no readable text. Inspect the artwork manually.")
+        if not refs:
+            notes.append("Add an approved logo in Settings to enable logo comparison.")
+        notice = " ".join(notes) or None
+    result = items, mode, len(snapshot), notice
     with engine.begin() as connection:
         if submission_id:
             revision = existing["revision"] if same_content else existing["revision"] + 1
@@ -113,15 +163,15 @@ def analyze(actor, data, submission_id=None):
             connection.execute(submissions.insert().values(
                 id=submission_id, workspace_id=actor.workspace_id, title=data.title,
                 content_type=data.content_type, platform=data.platform, status="REVIEWED",
-                creator=ACTORS[actor.role], revision=1, generation=1,
+                creator=actor_name(actor), campaign=data.campaign, revision=1, generation=1,
             ))
             same_content = False
         if not same_content:
             connection.execute(versions.insert().values(
                 id=version_id, submission_id=submission_id, number=revision,
-                content=data.content, content_hash=content_hash,
+                content=data.content, content_hash=content_hash, artwork_id=asset_id,
             ))
-        save_review(connection, version_id, result)
+        save_review(connection, version_id, result, snapshot)
         return detail(connection, actor, submission_id)
 
 
@@ -129,14 +179,15 @@ def save_draft(actor, data):
     require(actor, "creator")
     submission_id = new_id()
     with engine.begin() as connection:
+        attached(connection, actor, data.artwork_id)
         connection.execute(submissions.insert().values(
             id=submission_id, workspace_id=actor.workspace_id, title=data.title,
             content_type=data.content_type, platform=data.platform, status="DRAFT",
-            creator=ACTORS[actor.role], revision=1, generation=1,
+            creator=actor_name(actor), campaign=data.campaign, revision=1, generation=1,
         ))
         connection.execute(versions.insert().values(
             id=new_id(), submission_id=submission_id, number=1,
-            content=data.content, content_hash=sha256(data.content.encode()).hexdigest(),
+            content=data.content, content_hash=sha256(data.content.encode()).hexdigest(), artwork_id=data.artwork_id,
         ))
         return detail(connection, actor, submission_id)
 
@@ -144,7 +195,7 @@ def save_draft(actor, data):
 def log_action(connection, submission_id, version_id, actor, action, comment):
     connection.execute(actions.insert().values(
         id=new_id(), submission_id=submission_id, version_id=version_id,
-        actor=ACTORS[actor.role], action=action, comment=comment,
+        actor=actor_name(actor), action=action, comment=comment,
     ))
 
 

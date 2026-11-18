@@ -1,4 +1,6 @@
 from io import BytesIO
+import os
+from uuid import uuid4
 
 import pymupdf
 import pytest
@@ -6,7 +8,8 @@ from alembic import command
 from alembic.config import Config
 from docx import Document
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 from backend import db, main, workflow
 from backend.demo import DEMO_CONTENT
@@ -14,15 +17,31 @@ from backend.demo import DEMO_CONTENT
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    engine = create_engine("sqlite:///" + str(tmp_path / "test.sqlite"))
+    database = os.getenv("BRANDGUARD_TEST_DATABASE_URL", "")
+    pg = create_engine("postgresql+psycopg://" + database.split("://", 1)[1]) if database.startswith("postgres") else None
+    schema = "bg_test_" + uuid4().hex
+    if pg:
+        with pg.begin() as connection:
+            connection.execute(CreateSchema(schema))
+        engine = create_engine(pg.url, connect_args={"options": "-c search_path=" + schema})
+    else:
+        engine = create_engine("sqlite:///" + str(tmp_path / "test.sqlite"))
+        event.listen(engine, "connect", db.configure_sqlite)
     for module in (db, main, workflow):
         monkeypatch.setattr(module, "engine", engine)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.setenv("SECURE_COOKIES", "0")
-    command.upgrade(Config("alembic.ini"), "head")
-    with TestClient(main.app) as client:
-        yield client
-    engine.dispose()
+    monkeypatch.setenv("BRANDGUARD_MODE", "demo")
+    try:
+        command.upgrade(Config("alembic.ini"), "head")
+        with TestClient(main.app) as client:
+            yield client
+    finally:
+        engine.dispose()
+        if pg:
+            with pg.begin() as connection:
+                connection.execute(DropSchema(schema, cascade=True))
+            pg.dispose()
 
 
 def start(client):

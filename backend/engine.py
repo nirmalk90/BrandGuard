@@ -73,11 +73,14 @@ def analyze_rules(content, policy):
                     evidence_status="NEEDS_HUMAN_REVIEW" if uncertain else "CONTRADICTED",
                     requires_human_review=True,
                 ))
-        if kind == "approved_fact" and spec["description"].rstrip(".").casefold() in content.casefold():
-            results.append(grounded(
-                rule, original_text="", explanation=spec["description"], suggested_correction="",
-                evidence_status="SUPPORTED", requires_human_review=False,
-            ))
+        if kind == "approved_fact":
+            fact = spec["description"].rstrip(".").strip()
+            match = re.search(re.escape(fact), content, re.I) if fact else None
+            if match:
+                results.append(grounded(
+                    rule, original_text=match[0], explanation=spec["description"], suggested_correction="",
+                    evidence_status="SUPPORTED", requires_human_review=False,
+                ))
     for match in list(CLAIM.finditer(content))[:5]:
         if any(item.original_text and item.original_text.casefold() in match[0].casefold() for item in results):
             continue
@@ -113,11 +116,62 @@ def ai_available():
     return all(os.getenv(key) for key in ("LLM_CHAT_URL", "LLM_MODEL", "LLM_API_KEY"))
 
 
-def review(content, policy, use_ai):
+def policy_conflicts(policy, results):
+    # A required term can be present (and hence produce no missing-term finding)
+    # while a second rule explicitly prohibits that same occurrence.
+    required = [(rule, match_terms(rule["spec"]["pattern"])) for rule in policy
+                if rule["spec"]["kind"] == "required"]
+    replacements = {}
+    additional = []
+    supported = [item for item in results if item.evidence_status == "SUPPORTED" and item.original_text]
+    for item in results:
+        if not item.rule_id or not item.original_text or item.evidence_status == "SUPPORTED":
+            continue
+        quote = item.original_text.casefold()
+        for fact in supported:
+            if item.origin == fact.origin and quote in fact.original_text.casefold():
+                fact.conflict = item.conflict = True
+        if item.suggested_correction:
+            replacements.setdefault(quote, []).append(item)
+        for rule, pattern in required:
+            if pattern and pattern.fullmatch(item.original_text):
+                item.conflict = True
+                additional.append(grounded(rule, original_text=item.original_text,
+                    explanation=f"This required term is also flagged by “{item.rule_title}”.",
+                    suggested_correction="", evidence_status="NEEDS_HUMAN_REVIEW",
+                    requires_human_review=True, conflict=True, origin=item.origin, regions=item.regions))
+    for group in replacements.values():
+        if len({item.suggested_correction.strip().casefold() for item in group}) > 1:
+            for item in group:
+                item.conflict = True
+    return results + additional
+
+
+def review(content, policy, use_ai, artwork_text="", spans=()):
     policy = applicable(policy)
-    results = analyze_rules(content, policy)
+    if artwork_text:
+        ordinary = [rule for rule in policy if rule["spec"]["kind"] != "required"]
+        required = [rule for rule in policy if rule["spec"]["kind"] == "required"]
+        results = analyze_rules(content, ordinary)
+        results.extend(item for item in analyze_rules(content + "\n" + artwork_text, required)
+                       if item.rule_id)
+        offsets = {}
+        for item in analyze_rules(artwork_text, ordinary):
+            item.origin = "artwork"
+            quote = item.original_text.casefold()
+            if quote:
+                key = item.rule_id, quote
+                match = re.search(re.escape(item.original_text), artwork_text[offsets.get(key, 0):], flags=re.I)
+                if match:
+                    start = offsets.get(key, 0) + match.start()
+                    end = start + len(match[0])
+                    offsets[key] = end
+                    item.regions = [box for left, right, box in spans if left < end and right > start]
+            results.append(item)
+    else:
+        results = analyze_rules(content, policy)
     if not use_ai or not ai_available():
-        return results, "Rule-based", len(policy), None
+        return policy_conflicts(policy, results), "Rule-based", len(policy), None
 
     tokens = set(re.findall(r"\w{3,}", content.casefold()))
     ranked = sorted(
@@ -162,6 +216,6 @@ def review(content, policy, use_ai):
                     suggested_correction=item.correction, evidence_status="NEEDS_HUMAN_REVIEW",
                     requires_human_review=True,
                 ))
-        return results, "Hybrid", len(policy), None
+        return policy_conflicts(policy, results), "Hybrid", len(policy), None
     except (httpx.HTTPError, ValidationError, TypeError, ValueError, IndexError, KeyError):
-        return results, "Rule-based", len(policy), "AI assistance was unavailable. Rule checks completed."
+        return policy_conflicts(policy, results), "Rule-based", len(policy), "AI assistance was unavailable. Rule checks completed."

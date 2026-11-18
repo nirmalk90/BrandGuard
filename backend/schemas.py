@@ -57,12 +57,20 @@ class Rule(Input):
 
 
 class ReviewInput(Input):
-    content: Content
+    content: str = Field(default="", max_length=20000)
+    artwork_id: str | None = Field(default=None, min_length=36, max_length=36)
     use_ai: bool = False
+
+    @model_validator(mode="after")
+    def has_material(self):
+        if not self.content and not self.artwork_id:
+            raise ValueError("Add copy or attach artwork to review.")
+        return self
 
 
 class SubmissionInput(ReviewInput):
     title: Title
+    campaign: str = Field(default="Unassigned", min_length=1, max_length=100)
     content_type: str = Field(min_length=1, max_length=64)
     platform: str = Field(min_length=1, max_length=64)
 
@@ -102,3 +110,7 @@ class Finding(BaseModel):
     source_title: str | None = None
     source_version: int | None = None
     source_excerpt: str | None = None
+    origin: Literal["copy", "artwork"] = "copy"
+    regions: list[list[float]] = Field(default_factory=list)
+    policy_key: str | None = None
+    conflict: bool = False

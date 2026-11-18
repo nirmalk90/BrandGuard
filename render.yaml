@@ -2,7 +2,7 @@ services:
   - type: web
     name: brandguard-ai
     runtime: docker
-    plan: free
+    plan: 1c-2g
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
@@ -11,8 +11,10 @@ services:
           property: connectionString
       - key: SECURE_COOKIES
         value: "1"
+      - key: BRANDGUARD_MODE
+        value: team
 
 databases:
   - name: brandguard-db
-    plan: free
+    plan: 0.1c-256mb
     ipAllowList: []

@@ -4,6 +4,8 @@
 !alembic.ini
 !backend/
 !backend/**
+!wordpress/
+!wordpress/**
 !migrations/
 !migrations/**
 !package.json

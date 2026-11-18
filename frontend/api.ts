@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 export type Role = 'creator' | 'reviewer' | 'admin'
 export type Severity = 'critical' | 'high' | 'medium' | 'low'
 export type Profile = Record<'name' | 'description' | 'industry' | 'audience' | 'personality' | 'style' | 'tone' | 'primary_color' | 'secondary_color', string>
-export type Session = { role: Role; actor: string; profile: Profile; workspace_id: string; ai_available: boolean; sample: string }
+export type Session = { role: Role; actor: string; demo: boolean; profile: Profile; workspace_id: string; ai_available: boolean; sample: string }
 export type Source = { id: string; title: string; content: string; version: number }
 export type RuleSpec = {
   title: string; category: string; kind: 'phrase' | 'required' | 'price_floor' | 'approved_fact';
@@ -17,16 +17,18 @@ export type Finding = {
   suggested_correction: string; evidence_status: string; requires_human_review: boolean;
   rule_id: string | null; rule_title: string | null; rule_version: number | null;
   source_id: string | null; source_title: string | null; source_version: number | null;
-  source_excerpt: string | null; status: string; reason: string | null
+  source_excerpt: string | null; status: string; reason: string | null; origin?: string; regions?: number[][]; conflict?: boolean
 }
-export type Assessment = { id: string; created_at: string; mode: string; rules_checked: number; notice: string | null; findings: Finding[] }
-export type Version = { id: string; number: number; content: string; created_at: string; reviews: Assessment[] }
+export type RuleSnapshot = { id: string; version: number; title: string; colors?: string[]; references?: {id: string; name: string}[] }
+export type Assessment = { id: string; created_at: string; mode: string; rules_checked: number; notice: string | null; findings: Finding[]; rules_snapshot?: RuleSnapshot[] }
+export type Artwork = { id: string; name: string; width: number; height: number; text?: string }
+export type Version = { id: string; number: number; content: string; created_at: string; artwork: Artwork | null; reviews: Assessment[] }
 export type Action = { id: string; version_id: string; actor: string; action: string; comment: string; created_at: string }
 export type Summary = {
   id: string; title: string; content_type: string; platform: string; status: string;
-  revision: number; generation: number; creator: string; updated_at: string; created_at: string
+  revision: number; generation: number; creator: string; updated_at: string; created_at: string; campaign: string
 }
-export type Submission = Summary & { versions: Version[]; actions: Action[] }
+export type Submission = Summary & { versions: Version[]; actions: Action[]; wordpress?: Record<string, string | number> }
 export type Metrics = {
   total: number; violations: number; statuses: Record<string, number>; categories: Record<string, number>;
   severity: Record<string, number>; rules: Record<string, number>; trends: Record<string, number>
