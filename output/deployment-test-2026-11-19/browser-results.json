@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "checks": [
+    "live welcome and dashboard",
+    "recurring violation and conflict filters",
+    "rule version rates and -100pp change",
+    "campaign isolation and deduplication",
+    "exact evidence links",
+    "mobile overview without horizontal overflow",
+    "session data retrieved in new browser context"
+  ],
+  "javascriptErrors": [],
+  "failedRequests": []
+}

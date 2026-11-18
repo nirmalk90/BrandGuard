@@ -2,6 +2,10 @@
 
 Audit date: 18 November 2026 (IST)
 
+## Live deployment verification completed 19 November 2026
+
+The public application at https://brandguard-ai-pt15.onrender.com/ now has demo access enabled and passed the three existing browser scenarios, six additional API scenario groups and an additional governance browser exercise. The real WordPress editor test remains skipped. Persistence across infrastructure restart/redeploy is still unverified. See [the live deployment test report](live-deployment-test-2026-11-19.md) for current evidence and limitations. Earlier statements below about the absence of a public URL, inaccessible judge entry or only local verification are historical and superseded by this run.
+
 ## Final organizer instructions received 19 November 2026
 
 The latest announcement supplied by the user supersedes the earlier submission instructions: **one submission for the whole team, made by the team leader; members do not submit separately.** Submit at https://forms.gle/FxhT5Z1NupvGTGSw6 by **21 November 2026 at 11:59 PM IST**, with no late window or extension. The web reader could not open the form, so its individual fields and upload restrictions have not been verified.

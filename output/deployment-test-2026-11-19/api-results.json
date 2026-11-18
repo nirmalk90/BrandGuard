@@ -1,0 +1,48 @@
+{
+  "url": "https://brandguard-ai-pt15.onrender.com",
+  "date": "2026-11-19",
+  "results": [
+    {
+      "name": "Access and session cookies",
+      "status": "PASS",
+      "seconds": 1.81,
+      "detail": "Fresh private workspace; unauthenticated access rejected; Secure/HttpOnly/SameSite cookie."
+    },
+    {
+      "name": "Document imports and invalid inputs",
+      "status": "PASS",
+      "seconds": 3.95,
+      "detail": "TXT/PDF/DOCX extracted correctly; empty copy, malformed/unsupported/oversized uploads rejected."
+    },
+    {
+      "name": "Permissions, revisions and isolation",
+      "status": "PASS",
+      "seconds": 6.38,
+      "detail": "Role enforcement, stale updates, changes requested, approval, new-revision invalidation and cross-workspace isolation passed."
+    },
+    {
+      "name": "PNG and JPG visual review",
+      "status": "PASS",
+      "seconds": 11.66,
+      "detail": {
+        "result": "Real OCR, copy/artwork combined, logo match and colour regions passed for PNG and JPG.",
+        "upload_and_review_seconds": {
+          "PNG": 5.09,
+          "JPEG": 5.42
+        }
+      }
+    },
+    {
+      "name": "Campaign governance",
+      "status": "PASS",
+      "seconds": 4.56,
+      "detail": "Two conflicting revisions counted once each; other campaign excluded; v2 clean assessment and exact evidence IDs verified."
+    },
+    {
+      "name": "WordPress integration API",
+      "status": "PASS",
+      "seconds": 4.89,
+      "detail": "Plugin ZIP, snapshot submission, idempotency, approval, five changed fields and revocation passed. Real WordPress editor not exercised."
+    }
+  ]
+}

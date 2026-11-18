@@ -1,0 +1,68 @@
+const {chromium,expect}=require('@playwright/test');
+const fs=require('node:fs');
+const path=require('node:path');
+const output=path.resolve('output/deployment-test-2026-11-19');
+fs.mkdirSync(output,{recursive:true});
+(async()=>{
+ const browser=await chromium.launch();
+ const failures=[],errors=[];
+ try{
+  const context=await browser.newContext({baseURL:'https://brandguard-ai-pt15.onrender.com',viewport:{width:1440,height:1000}});
+  const page=await context.newPage();page.setDefaultTimeout(20000);
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('requestfailed',r=>failures.push({url:r.url(),error:r.failure()?.errorText}));
+  page.on('response',r=>{if(r.status()>=500)errors.push(r.status()+' '+r.url())});
+  await page.goto('/');
+  await expect(page.getByRole('button',{name:'Try Live Demo'})).toBeVisible();
+  await page.screenshot({path:path.join(output,'welcome.png'),fullPage:true});
+  await page.getByRole('button',{name:'Try Live Demo'}).click();
+  await expect(page.getByRole('heading',{name:'Workspace overview',exact:true})).toBeVisible();
+  await page.screenshot({path:path.join(output,'overview.png'),fullPage:true});
+  const api=async(url,method='GET',data)=>{const r=await context.request.fetch('/api'+url,{method,data});if(!r.ok())throw Error(r.status()+' '+await r.text());return r.json()};
+  await api('/demo/role','PUT',{role:'admin'});
+  const knowledge=await api('/knowledge');
+  const spec={title:'Live campaign acceptance rule',description:'Include approved term.',kind:'required',category:'Terminology',severity:'medium',pattern:'magic AI',source_id:knowledge.sources[0].id};
+  const rule=await api('/rules','POST',spec);
+  await api('/demo/role','PUT',{role:'creator'});
+  const create=(title,campaign='Audit campaign',content='magic AI')=>api('/submissions','POST',{title,campaign,content,content_type:'Advertisement',platform:'Web'});
+  const first=await create('First campaign review');
+  const rerun=await api('/submissions/'+first.id+'/reanalyze','POST',{content:'magic AI',generation:first.generation});
+  await create('Second campaign review');await create('Excluded review','Other campaign');
+  await api('/demo/role','PUT',{role:'admin'});await api('/rules/'+rule.id,'PUT',{...spec,pattern:'Approved phrase'});
+  await api('/demo/role','PUT',{role:'creator'});await create('Clean campaign review','Audit campaign','Approved phrase');
+  await page.getByRole('link',{name:'Campaign governance',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Rule performance',exact:true})).toBeVisible();
+  await page.locator('.campaign-selector select').selectOption('Audit campaign');
+  const rows=page.getByRole('row').filter({hasText:'Live campaign acceptance rule'});await expect(rows).toHaveCount(2);
+  const newest=rows.filter({has:page.getByRole('cell',{name:'v2',exact:true})});
+  const oldest=rows.filter({has:page.getByRole('cell',{name:'v1',exact:true})});
+  await expect(newest.getByRole('cell',{name:'0 / 1',exact:true})).toBeVisible();
+  await expect(newest.getByRole('cell',{name:'-100 pp',exact:true})).toBeVisible();
+  await expect(oldest.getByRole('cell',{name:'2 / 2',exact:true})).toBeVisible();
+  await page.screenshot({path:path.join(output,'governance.png'),fullPage:true});
+  await page.locator('.section-head select').selectOption('violation');
+  const violations=page.getByRole('row').filter({hasText:'AI product terminology'});await expect(violations).toHaveCount(1);
+  await violations.locator('summary').click();await expect(violations.getByRole('link')).toHaveCount(2);
+  await page.locator('.section-head select').selectOption('conflict');
+  const conflicts=page.getByRole('row').filter({hasText:'Live campaign acceptance rule'});await expect(conflicts).toHaveCount(1);
+  await conflicts.locator('summary').click();await expect(conflicts.getByRole('link')).toHaveCount(2);
+  const original=conflicts.getByRole('link',{name:'First campaign review · v1',exact:true});
+  await expect(original).toHaveAttribute('href','#review/'+first.id+'/1/'+rerun.versions[0].reviews.at(-1).id);
+  await original.click();await expect(page.getByRole('heading',{name:'First campaign review',exact:true})).toBeVisible();
+  await expect(page.locator('article.issue').filter({hasText:'Conflicting rules'})).toHaveCount(2);
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'Open navigation'}).click();
+  await page.getByRole('link',{name:'Overview',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Workspace overview',exact:true})).toBeVisible();
+  await page.screenshot({path:path.join(output,'mobile.png'),fullPage:true});
+  const width=await page.evaluate(()=>document.documentElement.scrollWidth);expect(width).toBeLessThanOrEqual(390);
+  // A new browser context with the same session must retrieve the saved assessment.
+  const reopened=await browser.newContext({baseURL:'https://brandguard-ai-pt15.onrender.com',storageState:await context.storageState()});
+  const restored=await reopened.request.get('/api/submissions/'+first.id);
+  expect(restored.ok()).toBeTruthy();expect((await restored.json()).versions[0].reviews.at(-1).id).toBe(rerun.versions[0].reviews.at(-1).id);
+  await reopened.close();
+  const result={status:'PASS',checks:['live welcome and dashboard','recurring violation and conflict filters','rule version rates and -100pp change','campaign isolation and deduplication','exact evidence links','mobile overview without horizontal overflow','session data retrieved in new browser context'],javascriptErrors:errors,failedRequests:failures};
+  fs.writeFileSync(path.join(output,'browser-results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ }catch(e){console.error(e);process.exitCode=1;fs.writeFileSync(path.join(output,'browser-results.json'),JSON.stringify({status:'FAIL',error:String(e),javascriptErrors:errors,failedRequests:failures},null,2));}
+ finally{await browser.close();}
+})();
